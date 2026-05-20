@@ -1,0 +1,313 @@
+import warnings
+warnings.filterwarnings("ignore")
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    mean_absolute_error,
+    mean_squared_error,
+    silhouette_score
+)
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.cluster import KMeans
+
+
+# Production file loads normally
+prod = pd.read_csv("Production_Log_01.csv")
+
+# Machine settings file: force column names because header is messy
+ms = pd.read_csv(
+    "Machine_Settings_Log_01.csv",
+    names=["configurationlogID", "gear", "rotationspeed"],
+    header=0
+)
+
+# Clean column names
+prod.columns = prod.columns.str.strip()
+ms.columns = ms.columns.str.strip()
+
+print("Production shape:", prod.shape)
+print("Machine settings shape:", ms.shape)
+
+print("\nProduction columns:")
+print(prod.columns.tolist())
+
+print("\nMachine settings columns:")
+print(ms.columns.tolist())
+
+# Machine settings
+ms = pd.read_csv(
+    "Machine_Settings_Log_01.csv",
+    names=["configuration_log_ID", "gear", "rotationspeed"],
+    header=0
+)
+
+# Strip spaces from both DataFrames (optional but good)
+prod.columns = prod.columns.str.strip()
+ms.columns = ms.columns.str.strip()
+
+# Convert key column to numeric in both
+prod["configuration_log_ID"] = pd.to_numeric(prod["configuration_log_ID"], errors="coerce")
+ms["configuration_log_ID"] = pd.to_numeric(ms["configuration_log_ID"], errors="coerce")
+
+prod = prod.dropna(subset=["configuration_log_ID"])
+ms = ms.dropna(subset=["configuration_log_ID"])
+
+# Remove duplicates in machine settings if any
+ms = ms.drop_duplicates(subset=["configuration_log_ID"])
+
+# Merge
+merged = pd.merge(
+    prod,
+    ms,
+    on="configuration_log_ID",
+    how="inner"
+)
+
+print(merged.shape)
+print(merged.head())
+
+# 4. TARGET CLEANING
+# =========================
+
+# Keep only rows where error_type exists
+df = merged.dropna(subset=["error_type"]).copy()
+
+# Remove impossible/dirty values if needed
+# Example: some rows seem to contain strange values in quality-related columns in the data file
+numeric_cols_all = df.select_dtypes(include=[np.number]).columns.tolist()
+
+for col in numeric_cols_all:
+    df[col] = pd.to_numeric(df[col], errors="coerce")
+
+print("\nFinal modeling shape:", df.shape)
+print("\nError type distribution:")
+print(df["error_type"].value_counts())
+
+
+# 5. BASIC DESCRIPTION
+# =========================
+
+print("\nData info:")
+print(df.info())
+
+print("\nNumerical description:")
+print(df.describe(include=[np.number]).T)
+
+print("\nCategorical description:")
+print(df.describe(include=["object"]).T)
+
+# 6. CORRELATION ANALYSIS
+# =========================
+
+# Encode target for correlation only
+le_corr = LabelEncoder()
+df["error_type_encoded"] = le_corr.fit_transform(df["error_type"])
+
+numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+# Remove identifiers from correlation if present
+drop_for_corr = ["configurationlogID", "error_type_encoded"]
+corr_features = [c for c in numeric_cols if c not in drop_for_corr]
+
+corr_df = df[corr_features + ["error_type_encoded"]].corr()
+
+plt.figure(figsize=(16, 10))
+sns.heatmap(corr_df,annot=True, cmap="coolwarm")
+plt.title("Correlation Heatmap")
+plt.tight_layout()
+plt.show()
+
+target_corr = corr_df["error_type_encoded"].drop("error_type_encoded").sort_values(key=np.abs, ascending=False)
+
+print("\nTop features correlated with error_type:")
+print(target_corr.head(15))
+
+plt.figure(figsize=(10, 6))
+target_corr.head(15).sort_values().plot(kind="barh", color="teal")
+plt.title("Top 15 Features Correlated with error_type")
+plt.xlabel("Correlation with error_type_encoded")
+plt.tight_layout()
+plt.show()
+
+
+ 7. FEATURE SELECTION
+# =====================================================================================
+
+# Drop columns that leak the answer too directly if needed
+# For predicting error_type before/at machine usage, you may want to discuss two feature sets:
+# A) all features
+# B) only input + machine settings features
+
+input_features = [
+    "width", "height", "ionizationclass", "FluxCompensation",
+    "pressure", "karma", "modulation",
+    "gear", "rotationspeed"
+]
+
+available_input_features = [col for col in input_features if col in df.columns]
+
+X = df[available_input_features].copy()
+y = df["error_type"].copy()
+
+print("\nSelected features:")
+print(available_input_features)
+
+# 8. PREPROCESSING
+# ===========================================================================
+
+numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
+categorical_features = X.select_dtypes(include=["object"]).columns.tolist()
+
+numeric_transformer = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+
+categorical_transformer = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(handle_unknown="ignore"))
+])
+
+preprocessor = ColumnTransformer(transformers=[
+    ("num", numeric_transformer, numeric_features),
+    ("cat", categorical_transformer, categorical_features)
+])
+
+# Encode target
+le = LabelEncoder()
+y_encoded = le.fit_transform(y)
+====================================================================================
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y_encoded,
+    test_size=0.2,
+    random_state=42,
+    stratify=y_encoded
+)
+
+print("\nTrain shape:", X_train.shape)
+print("Test shape:", X_test.shape)
+
+
+models = {
+    "Decision Tree": DecisionTreeClassifier(
+        random_state=42,
+        max_depth=8,
+        min_samples_split=10,
+        min_samples_leaf=5
+    ),
+    "Random Forest": RandomForestClassifier(
+        random_state=42,
+        n_estimators=200,
+        max_depth=10,
+        min_samples_split=10,
+        min_samples_leaf=5,
+        n_jobs=-1
+    ),
+    "Gradient Boosting": GradientBoostingClassifier(
+        random_state=42,
+        n_estimators=150,
+        learning_rate=0.08,
+        max_depth=3
+    ),
+    "Logistic Regression": LogisticRegression(
+        max_iter=2000,
+        random_state=42
+    )
+}
+
+
+results = []
+
+for name, model in models.items():
+    clf = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("model", model)
+    ])
+
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+
+    acc = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, average="weighted", zero_division=0)
+    recall = recall_score(y_test, y_pred, average="weighted", zero_division=0)
+    f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
+
+    # Regression-like metrics on encoded labels
+    mae = mean_absolute_error(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+
+    results.append({
+        "Model": name,
+        "Accuracy": acc,
+        "Precision": precision,
+        "Recall": recall,
+        "F1": f1,
+        "MAE": mae,
+        "RMSE": rmse
+    })
+
+    print("\n" + "=" * 50)
+    print(name)
+    print("=" * 50)
+    print("Accuracy:", acc)
+    print("Precision:", precision)
+    print("Recall:", recall)
+    print("F1 Score:", f1)
+    print("MAE:", mae)
+    print("RMSE:", rmse)
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred, target_names=le.classes_, zero_division=0))
+
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(7, 5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                xticklabels=le.classes_, yticklabels=le.classes_)
+    plt.title(f"Confusion Matrix - {name}")
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.tight_layout()
+    plt.show()
+
+=======================================================================================================
+best_two = results_df.head(2)
+print("\nBest two models to")
+print(best_two)
+
+plt.figure(figsize=(10, 5))
+sns.barplot(data=results_df, x="F1", y="Model", palette="viridis")
+plt.title("Model Comparison by F1 Score")
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 5))
+sns.barplot(data=results_df, x="RMSE", y="Model", palette="magma")
+plt.title("Model Comparison by RMSE")
+plt.tight_layout()
+plt.show()
+
+results_df = pd.DataFrame(results).sort_values(
+    by=["F1", "Accuracy"],
+    ascending=False
+)
+
+print("\nFinal model comparison:")
+print(results_df)
+
+
