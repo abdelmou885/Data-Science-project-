@@ -1,0 +1,268 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import (
+    classification_report,
+    ConfusionMatrixDisplay,
+    accuracy_score
+)
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+
+
+# ---------------------------
+# 0. Visual Style Setup
+# ---------------------------
+sns.set_theme(style="whitegrid", context="notebook", palette="muted")
+
+# ---------------------------
+# 1. Load and Merge Data
+# ---------------------------
+df_prod = pd.read_csv("Production_Log_01.csv")
+df_mach = pd.read_csv("Machine_Settings_Log_01.csv")
+
+df = pd.merge(df_prod, df_mach, on="configuration_log_ID", how="left")
+
+# Filter invalid width
+df = df[df["width"] < 200].copy()
+
+# ---------------------------
+# 2. Binary Target
+# ---------------------------
+df["is_faulty"] = df["error_type"].notna().astype(int)
+
+y = df["is_faulty"]
+
+# ---------------------------
+# 3. Drop leakage / outputs / IDs
+# ---------------------------
+outputs_to_drop = [
+    "error_type", "error", "Quality",
+    "weight_in_kg", "weight_in_g",
+    "reflectionScore", "distortion", "nicesness", "smartness",
+    "multideminsionality", "roughness",
+    "id", "configuration_log_ID", "Unnamed: 0",
+    "is_faulty"
+]
+
+X = df.drop(columns=outputs_to_drop, errors="ignore")
+
+# ---------------------------
+# 4. Define categorical/numeric columns
+# ---------------------------
+cat_cols = [c for c in ["ionizationclass", "gear", "FluxCompensation"] if c in X.columns]
+
+for col in cat_cols:
+    X[col] = X[col].astype(str)
+
+num_cols = [c for c in X.columns if c not in cat_cols]
+
+print("Categorical columns:", cat_cols)
+print("Numeric columns:", num_cols)
+
+# ---------------------------
+# 5. Train-Test Split
+# ---------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.5,
+    random_state=101,
+    stratify=y
+)
+
+# ---------------------------
+# 6. Preprocessing + Model Pipeline
+# ---------------------------
+numeric_transformer = Pipeline([
+    ("imputer", SimpleImputer(strategy="median"))
+])
+
+categorical_transformer = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(handle_unknown="ignore"))
+])
+
+preprocessor = ColumnTransformer([
+    ("num", numeric_transformer, num_cols),
+    ("cat", categorical_transformer, cat_cols)
+])
+
+model = DecisionTreeClassifier(
+    random_state=42,
+    max_depth=5
+)
+
+clf = Pipeline([
+    ("preprocessor", preprocessor),
+    ("model", model)
+])
+
+# B) Logistic Regression pipeline
+# ---------------------------
+log_clf = Pipeline([
+    ("preprocessor", preprocessor),
+    ("model", LogisticRegression(
+        max_iter=500,
+        class_weight="balanced",
+        solver="liblinear"  # good for small/medium data with class_weight
+    ))
+])
+
+log_clf.fit(X_train, y_train)
+log_pred = log_clf.predict(X_test)
+log_proba = log_clf.predict_proba(X_test)[:, 1]
+
+print("\n=== Logistic Regression (binary is_faulty) ===")
+print("Accuracy:", accuracy_score(y_test, log_pred))
+print(classification_report(y_test, log_pred))
+
+# ---------------------------
+# 7. Fit + Predict
+# ---------------------------
+clf.fit(X_train, y_train)
+
+y_pred = clf.predict(X_test)
+y_proba = clf.predict_proba(X_test)[:, 1]
+
+print("\nBinary classification (faulty vs non-faulty):")
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+# ---------------------------
+# 8. Confusion Matrix
+# ---------------------------
+plt.figure(figsize=(6, 5))
+ConfusionMatrixDisplay.from_predictions(
+    y_test,
+    y_pred,
+    display_labels=["Not faulty (0)", "Faulty (1)"],
+    cmap="Blues",
+    colorbar=True
+)
+plt.title(f"Confusion Matrix\nAccuracy: {accuracy_score(y_test, y_pred):.2%}")
+plt.grid(False)
+plt.tight_layout()
+plt.savefig("binary_confusion_matrix.png", dpi=300, bbox_inches="tight")
+plt.show()
+
+# ---------------------------
+# 9. Feature Importances
+# ---------------------------
+if len(cat_cols) > 0:
+    ohe = clf.named_steps["preprocessor"].named_transformers_["cat"].named_steps["onehot"]
+    cat_feature_names = ohe.get_feature_names_out(cat_cols)
+else:
+    cat_feature_names = np.array([])
+
+all_feature_names = np.concatenate([num_cols, cat_feature_names])
+
+importances = clf.named_steps["model"].feature_importances_
+
+importance_df = pd.DataFrame({
+    "feature": all_feature_names,
+    "importance": importances
+}).sort_values("importance", ascending=False)
+
+print("\nTop 15 features:")
+print(importance_df.head(15))
+
+top_n = min(15, len(importance_df))
+top_features = importance_df.head(top_n)
+
+plt.figure(figsize=(10, 6))
+sns.barplot(
+    data=top_features,
+    x="importance",
+    y="feature",
+    hue="feature",
+    dodge=False,
+    palette="viridis",
+    legend=False
+)
+plt.title(f"Top {top_n} Features by Importance")
+plt.xlabel("Importance")
+plt.ylabel("Feature")
+plt.tight_layout()
+plt.savefig("binary_feature_importance.png", dpi=300, bbox_inches="tight")
+plt.show()
+
+# ---------------------------
+# 10. Scatter Plot
+# ---------------------------
+# Change these if you want different numeric features
+feat_x = "width"
+feat_y = "height"
+
+if feat_x in X_test.columns and feat_y in X_test.columns:
+    plt.figure(figsize=(7, 6))
+    scatter = plt.scatter(
+        X_test[feat_x],
+        X_test[feat_y],
+        c=y_test,
+        cmap="bwr",
+        alpha=0.6,
+        edgecolor="k"
+    )
+    plt.xlabel(feat_x)
+    plt.ylabel(feat_y)
+    plt.title("Test Data Scatter Colored by True is_faulty")
+    cbar = plt.colorbar(scatter, ticks=[0, 1])
+    cbar.ax.set_yticklabels(["Not faulty", "Faulty"])
+    plt.tight_layout()
+    plt.savefig("binary_scatter_plot.png", dpi=300, bbox_inches="tight")
+    plt.show()
+
+# ---------------------------
+# 11. Decision Tree Plot
+# ---------------------------
+# Note:
+# Since the model is inside a pipeline with one-hot encoding,
+# the tree uses transformed feature names.
+# We'll plot the tree using those transformed names.
+
+plt.figure(figsize=(80, 80))
+plot_tree(
+    clf.named_steps["model"],
+    feature_names=all_feature_names,
+    class_names=["Not faulty", "Faulty"],
+    filled=True,
+    rounded=True,
+    fontsize=50
+)
+plt.title("Decision Tree for Binary is_faulty Model")
+plt.tight_layout()
+plt.savefig("binary_decision_tree.png", dpi=300, bbox_inches="tight")
+plt.show()
+
+# ---------------------------
+# 12. Prediction Probability Histogram
+# ---------------------------
+plt.figure(figsize=(8, 5))
+sns.histplot(
+    y_proba,
+    bins=30,
+    kde=True,
+    color="purple",
+    edgecolor="black",
+    alpha=0.6
+)
+plt.title("Prediction Probability for Faulty Class")
+plt.xlabel("Predicted Probability of Faulty")
+plt.ylabel("Frequency")
+plt.xlim(0, 1)
+plt.tight_layout()
+plt.savefig("binary_probability_histogram.png", dpi=300, bbox_inches="tight")
+plt.show()
+
+
+# Add this temporarily to check training performance
+train_pred = clf.predict(X_train)
+print(classification_report(y_train, train_pred))
+
