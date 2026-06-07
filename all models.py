@@ -434,7 +434,7 @@ bars = plt.bar(
 for bar, val in zip(bars, [status_quo_cost, lr_model_cost]):
     plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 20,
              f"{val} EUR", ha="center", fontsize=11, fontweight="bold")
-plt.ylabel("Total Cost (EUR)")
+plt.ylabel("Total Cost  (EUR)")
 plt.title(f"Estimated Savings with Logistic Regression\n savings: {lr_savings} EUR  ({lr_savings/status_quo_cost*100:.1f}% reduction)")
 plt.grid(axis="y", alpha=0.3)
 plt.tight_layout()
