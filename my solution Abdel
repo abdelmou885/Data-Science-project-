@@ -72,7 +72,7 @@ print("Numeric columns:", num_cols)
 # ---------------------------
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
-    test_size=0.5,
+    test_size=0.2,
     random_state=101,
     stratify=y
 )
@@ -265,4 +265,29 @@ plt.show()
 # Add this temporarily to check training performance
 train_pred = clf.predict(X_train)
 print(classification_report(y_train, train_pred))
+
+#################################################################################
+cost_faulty = 150   # EUR per faulty product if not caught
+cost_discard = 10   # EUR per product discarded early
+
+# Confusion matrix for binary model (0 = not faulty, 1 = faulty)
+from sklearn.metrics import confusion_matrix
+
+cm = confusion_matrix(y_test, y_pred)
+tn, fp, fn, tp = cm.ravel()
+
+# Status quo: no model, everything produced
+n_faulty = y_test.sum()
+status_quo_cost = n_faulty * cost_faulty
+
+# With model: assume we discard everything the model flags as faulty
+# False positives → discarded good material (10 EUR)
+# False negatives → faulty products that slip through (150 EUR)
+model_cost = fp * cost_discard + fn * cost_faulty
+
+savings = status_quo_cost - model_cost
+
+print("Status quo cost:", status_quo_cost)
+print("Cost with model:", model_cost)
+print("Estimated savings:", savings)
 
