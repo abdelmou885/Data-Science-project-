@@ -45,7 +45,7 @@ trend = np.poly1d(np.polyfit(z_predicted, residuals, 2))
 plt.plot(z_predicted[order], trend(z_predicted[order]),
          color="orange", linewidth=2, label="Residual trend (U-shape)")
 
-plt.xlabel("Predicted weight_in_kg")
+plt.xlabel("Predicted Weight (kg)")
 plt.ylabel("Residual (actual - predicted)")
 plt.title("Residual Plot of Plain Linear Model (width only)\nU-shape = systematic error")
 plt.legend()
