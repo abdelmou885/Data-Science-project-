@@ -349,12 +349,13 @@ print("[10] Saved: plot_06_extended_comparison.png")
 # 11. ESTIMATED SAVINGS — LOGISTIC REGRESSION
 # ==========================================
 cost_faulty  = 150  # EUR: faulty product slips through (FN)
-cost_discard = 10   # EUR: good product discarded by mistake (FP)
+cost_discard = 10   # EUR: product discarded before production (TP, FP)
 
 n_faulty        = y_test.sum()
 status_quo_cost = n_faulty * cost_faulty
 
-lr_model_cost = fp * cost_discard + fn * cost_faulty
+# ИСПРАВЛЕНО: добавлена стоимость отбраковки для TP
+lr_model_cost = (tp * cost_discard) + (fp * cost_discard) + (fn * cost_faulty)
 lr_savings    = status_quo_cost - lr_model_cost
 
 print("\n" + "="*60)
@@ -368,7 +369,8 @@ print(f"  All faulty products slip through")
 print(f"  Status quo cost:        {status_quo_cost} EUR")
 print(f"")
 print(f"  --- With Logistic Regression ---")
-print(f"  TP (correctly flagged faulty): {tp}")
+# ИСПРАВЛЕНО: обновлен текстовый вывод для наглядности
+print(f"  TP (correctly flagged faulty): {tp}  × {cost_discard} EUR = {tp * cost_discard} EUR")
 print(f"  FP (good → wrongly discarded): {fp}  × {cost_discard} EUR = {fp * cost_discard} EUR")
 print(f"  FN (faulty → missed):          {fn}  × {cost_faulty} EUR = {fn * cost_faulty} EUR")
 print(f"  Total model cost:       {lr_model_cost} EUR")
