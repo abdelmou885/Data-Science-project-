@@ -226,7 +226,66 @@ plt.show()
 
 
 # ============================================================
-# 8. CONFUSION MATRICES FOR ALL MODELS
+# 8. HORIZONTAL RANKING CHART – MACRO F1 (BEST TO WORST)
+# ============================================================
+
+# `comparison` is already sorted by Macro F1 (best first). For a
+# horizontal bar chart we reverse it so the best model sits on top.
+ranking = comparison.iloc[::-1].reset_index(drop=True)
+
+# Per-bar colours: Random Forest highlighted, Decision Tree greyed
+# out to read as the clearly weaker model, everyone else neutral.
+def bar_color(model):
+    if model == "Random Forest":
+        return "#2ca02c"          # highlight (green)
+    if model == "Decision Tree":
+        return "#cccccc"          # de-emphasised (light grey)
+    return "#4c72b0"              # neutral (blue)
+
+colors = [bar_color(m) for m in ranking["Model"]]
+
+fig, ax = plt.subplots(figsize=(10, 6))
+bars = ax.barh(ranking["Model"], ranking["Macro F1"], color=colors)
+
+# Hatch + dashed edge to visually separate Decision Tree as weaker.
+for bar, model in zip(bars, ranking["Model"]):
+    if model == "Decision Tree":
+        bar.set_hatch("//")
+        bar.set_edgecolor("#888888")
+        bar.set_linestyle("--")
+        bar.set_linewidth(1.2)
+
+ax.set_title("Model Ranking – Macro F1 (best to worst)")
+ax.set_xlabel("Macro F1")
+ax.set_xlim(0, 1.12)
+
+# Main label: Macro F1. Smaller secondary label: Test Accuracy.
+for bar, f1, acc in zip(bars, ranking["Macro F1"], ranking["Test Accuracy"]):
+    y = bar.get_y() + bar.get_height() / 2
+    x = bar.get_width()
+    ax.text(x + 0.01, y, f"{f1:.3f}",
+            va="center", ha="left", fontsize=11, fontweight="bold")
+    ax.text(x + 0.07, y, f"acc {acc:.3f}",
+            va="center", ha="left", fontsize=8, color="#555555")
+
+# Legend explaining the colour coding.
+from matplotlib.patches import Patch
+legend_handles = [
+    Patch(facecolor="#2ca02c", label="Random Forest (best)"),
+    Patch(facecolor="#4c72b0", label="Other models"),
+    Patch(facecolor="#cccccc", hatch="//", edgecolor="#888888",
+          label="Decision Tree (weakest)"),
+]
+ax.legend(handles=legend_handles, loc="lower right", fontsize=8)
+
+plt.tight_layout()
+plt.savefig("model_comparison_ranking.jpg", dpi=150, bbox_inches="tight")
+print("Saved: model_comparison_ranking.jpg")
+plt.show()
+
+
+# ============================================================
+# 9. CONFUSION MATRICES FOR ALL MODELS
 # ============================================================
 
 fig, axes = plt.subplots(2, 2, figsize=(12, 10))
